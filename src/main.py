@@ -1,7 +1,6 @@
-# from functools import reduce
+
 # from io import BytesIO
 # import ssl
-# from typing import Any, Callable, Iterable, TypeVar
 # from urllib.request import urlopen
 
 # import certifi
@@ -11,10 +10,6 @@
 # CRYFALL_IMAGE_URL: str = 'https://cards.scryfall.io/normal/front/b/d/bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd.jpg';
 # MTGJSON_TYPES_FILE_URL = 'https://mtgjson.com/types/AllMTGJSONTypes.ts';
 
-# T = TypeVar("T")
-
-# def pipe(funcs: Iterable[Callable[[T], T]],value: T) -> T:
-#     return reduce(lambda acc, f: f(acc), funcs, value)
 
 # def fetch_image(url: str) -> Image.Image:
 #     context = ssl.create_default_context(cafile=certifi.where())
@@ -46,16 +41,30 @@
 
 
 
-import sys
 import argparse
+import sys
+from functools import reduce
+from typing import Callable, Iterable, TypeVar
+
 import usb.core
 import usb.util
-from escpos.printer import Usb, Network
+from escpos.printer import Network, Usb
+from escpos.escpos import Escpos
 
 ATOMIC_CARDS_JSON = 'https://mtgjson.com/api/v5/AtomicCards.json';
 CRYFALL_IMAGE_URL = 'https://cards.scryfall.io/normal/front/b/d/bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd.jpg';
 VENDOR_ID = 0x154f;
 PRODUCT_ID = 0x154f;
+DESCRIPTION = """
+    Implementation of the \'Magic The Gathering\', Momir format.
+"""
+PROG = 'momir'
+
+
+T = TypeVar("T")
+
+def pipe(funcs: Iterable[Callable[[T], T]],value: T) -> T:
+    return reduce(lambda acc, f: f(acc), funcs, value)
 
 # get printer
 ## usb option
@@ -63,7 +72,7 @@ PRODUCT_ID = 0x154f;
     Due to some Operating System shit, (at least) on mac, when using usb, the OS claims the deviceresulting in me
         not able to shit, so i make the OS give it to me :)
 '''
-def get_usb_printer(vendor_id:str, product_id: str) -> Usb:
+def get_usb_printer(vendor_id:str, product_id: str) -> Escpos:
     print("🚀 Claiming raw hardware interface...")
     dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
 
@@ -90,54 +99,54 @@ def get_usb_printer(vendor_id:str, product_id: str) -> Usb:
     return p;
 
 ## network option
-def get_network_printer(ip: str, port: int) -> Network:
+def get_network_printer(ip: str, port: int) -> Escpos:
     return Network("10.100.10.100", profile="TM-T88III")
 
 def init_db() -> None:
     ...
 
+import ctypes
+import os
+import sys
+
+
+def is_admin() -> bool:
+    """Returns True if the script is running with root/administrator privileges."""
+    try:
+        # Check for Unix/Linux/macOS root (UID 0)
+        if hasattr(os, 'getuid'):
+            return os.getuid() == 0
+        
+        # Check for Windows Administrator
+        else:
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            
+    except Exception:
+        return False
 
 if __name__ == "__main__":
-    DESCRIPTION = """
-        Implementation of the \'Magic The Gathering\', Momir format.
-    """
-    PROG = 'momir'
+    if not is_admin():
+        print("❌ Error: This script requires root/administrator privileges to access raw USB hardware.")
+        print("Please run with 'sudo python script.py' or as an Administrator.")
+        sys.exit(1)
 
     parser = argparse.ArgumentParser(prog=PROG, description=DESCRIPTION)
-    parser.add_argument('-m', '--mana', help='mana value', required=True)
-    parser.add_argument('--init', help='initialize local db')
+    parser.add_argument('-m', '--mana', help='mana value', required=True, type=int)
+    parser.add_argument('--init', help='initialize local db', required=False)
     # import, via file or url
-
-
-    parser.add_argument('--land-price', help='maximum price of land card (overrule the card price, obviusly...).', required=False)
-    parser.add_argument('--ignore', help='ignore names when checking price.', nargs='+', required=False)
-    parser.add_argument('--formats', help='check legality for the formats.', nargs='+', required=False)
-    parser.add_argument('--clipboard', help='copy the output to clipboard', action='store_true', required=False)
 
     args = parser.parse_args()
 
-    DEFAULT_PRICE = 10
-    DEFAULT_LAND_PRICE = 1
-    DEFAULT_IGNORE_NAMES: list[str] = []
-    DEFAULT_FORMATS: list[str] = ['commander']
+    mana: int = args.mana
+    should_initialize = args.init or False
 
-    max_price = args.price or DEFAULT_PRICE
-    max_land_price = args.land_price or DEFAULT_LAND_PRICE
-    ignore_names = args.ignore or DEFAULT_IGNORE_NAMES
-    formats = args.formats or DEFAULT_FORMATS
-
-    output_names: list[str] = main(args.input, max_price, max_land_price, ignore_names, formats)
-
-    output = '\n'.join(sorted(name for name in output_names))
-
-    if args.clipboard:
-        os = platform.system()
-        copy_to_clip(os, str(output))
-    else:
-        print(output)
-
+    if should_initialize:
+        init_db();
+        print('db initialized successfully');
+        sys.exit(0);
 
     try:
+        p: Escpos = None
         p.codepage = 'cp862'
         
         # Hardware cut
